@@ -162,38 +162,15 @@ export const SUPPORTED_MARKETS: MarketSymbol[] = [
   },
 ];
 
-// Realistic distinct price baselines per market
-export const MARKET_BASELINE_PRICES: Record<string, number> = {
-  '1HZ10V': 4821.52,
-  '1HZ15V': 3120.45,
-  '1HZ25V': 2194.88,
-  '1HZ30V': 5612.33,
-  '1HZ50V': 345.1824,
-  '1HZ75V': 876.5419,
-  '1HZ90V': 6214.71,
-  '1HZ100V': 1245.38,
-  '1HZ150V': 9450.12,
-  '1HZ200V': 11840.65,
-  '1HZ250V': 14210.84,
-  '1HZ300V': 18920.42,
-  'JD10': 1520.45,
-  'JD25': 2410.88,
-  'JD50': 4850.12,
-  'JD75': 7120.65,
-  'JD100': 9640.35,
-  'R_10': 782.145,
-  'R_25': 1340.521,
-  'R_50': 234.9182,
-  'R_75': 641.8724,
-  'R_100': 1582.49,
-};
-
 export const DERIV_ENDPOINTS = [
   'wss://ws.derivws.com/websockets/v3',
   'wss://ws.binaryws.com/websockets/v3',
+  'wss://blue.derivws.com/websockets/v3',
+  'wss://green.derivws.com/websockets/v3',
+  'wss://red.derivws.com/websockets/v3',
 ];
 
-export type ConnectionState = 'connecting' | 'connected' | 'fallback_live' | 'disconnected' | 'error';
+export type ConnectionState = 'connecting' | 'connected' | 'disconnected' | 'error';
 type TickCallback = (symbol: string, tick: DerivTick) => void;
 type HistoryCallback = (symbol: string, ticks: DerivTick[]) => void;
 type BalanceCallback = (account: DerivAccount) => void;
@@ -206,9 +183,7 @@ class DerivWebSocketService {
   private currentEndpointIndex: number = 0;
   private connectionState: ConnectionState = 'connecting';
   private reconnectTimer: any = null;
-  private connectTimeoutTimer: any = null;
   private pingTimer: any = null;
-  private fallbackTimer: any = null;
   private pingStartTime: number = 0;
   private latencyMs: number = 0;
   private activeSubscriptions = new Map<string, string>();
@@ -217,16 +192,36 @@ class DerivWebSocketService {
   private subscriptionQueueTimer: any = null;
   private authCallbacks: AuthCallback[] = [];
   private isIntentionalDisconnect: boolean = false;
-  private currentFallbackPrices: Record<string, number> = { ...MARKET_BASELINE_PRICES };
+  private reqIdCounter: number = 0;
 
-  // Account state
+  private pendingBuyRequests = new Map<
+    number,
+    {
+      symbol: string;
+      contractType: string;
+      stake: number;
+      onComplete?: (won: boolean, exitTick?: DerivTick, payout?: number, errorMsg?: string, contractId?: number) => void;
+    }
+  >();
+
+  private pendingOpenContracts = new Map<
+    number,
+    {
+      symbol: string;
+      contractType: string;
+      stake: number;
+      onComplete?: (won: boolean, exitTick?: DerivTick, payout?: number, errorMsg?: string, contractId?: number) => void;
+    }
+  >();
+
+  // Real Account state (no fake balances)
   private account: DerivAccount = {
     isAuthorized: false,
     currency: 'USD',
-    balance: 10000.0,
-    isVirtual: true,
-    loginId: 'VRTC_DEMO',
-    fullName: 'Demo Trader',
+    balance: 0.0,
+    isVirtual: false,
+    loginId: '',
+    fullName: '',
   };
 
   // Callbacks
@@ -333,16 +328,7 @@ class DerivWebSocketService {
 
     this.setState('connecting');
     const endpoint = DERIV_ENDPOINTS[this.currentEndpointIndex];
-    // Deriv standard query string is just ?app_id=
-    const url = `${endpoint}?app_id=${this.appId}`;
-
-    if (this.connectTimeoutTimer) clearTimeout(this.connectTimeoutTimer);
-    this.connectTimeoutTimer = setTimeout(() => {
-      if (this.connectionState !== 'connected') {
-        console.warn(`[DerivWS] Connection timeout after 8s on ${endpoint}. Rotating...`);
-        this.rotateEndpointAndRetry();
-      }
-    }, 8000);
+    const url = `${endpoint}?app_id=${this.appId}&brand=deriv`;
 
     try {
       if (this.ws) {
@@ -365,8 +351,6 @@ class DerivWebSocketService {
     }
 
     this.ws.onopen = () => {
-      if (this.connectTimeoutTimer) clearTimeout(this.connectTimeoutTimer);
-      this.stopFallbackStream();
       this.setState('connected');
       this.connectionErrorReason = '';
       this.startHeartbeat();
@@ -376,7 +360,7 @@ class DerivWebSocketService {
         this.send({ authorize: this.account.token });
       }
 
-      // Stagger subscription to avoid rate limits
+      // Stagger subscriptions nicely within Deriv rate limits (1 req / 180ms)
       this.flushSubscriptions();
     };
 
@@ -385,12 +369,12 @@ class DerivWebSocketService {
         const data = JSON.parse(event.data);
         this.handleMessage(data);
       } catch (e) {
-        console.error('Failed to parse WS message:', e);
+        console.error('[DerivWS] Failed to parse message:', e);
       }
     };
 
     this.ws.onerror = (e) => {
-      console.warn(`[DerivWS] Error on endpoint: ${endpoint}`, e);
+      console.warn(`[DerivWS] Connection error on ${endpoint}:`, e);
       this.connectionErrorReason = `Failed to connect to ${endpoint}.`;
       this.rotateEndpointAndRetry();
     };
@@ -398,20 +382,15 @@ class DerivWebSocketService {
     this.ws.onclose = (event) => {
       this.stopHeartbeat();
       if (!this.isIntentionalDisconnect) {
-        this.connectionErrorReason = `WebSocket closed (code: ${event.code})`;
+        this.setState('disconnected');
+        this.connectionErrorReason = `Connection closed (code: ${event.code})`;
         this.scheduleReconnect(2500);
       }
     };
   }
 
   private rotateEndpointAndRetry() {
-    if (this.connectTimeoutTimer) {
-      clearTimeout(this.connectTimeoutTimer);
-      this.connectTimeoutTimer = null;
-    }
     this.currentEndpointIndex = (this.currentEndpointIndex + 1) % DERIV_ENDPOINTS.length;
-    // Activate fallback stream with diverse per-market baseline prices so UI stays active while reconnecting
-    this.startFallbackStream();
     this.scheduleReconnect(2000);
   }
 
@@ -433,7 +412,6 @@ class DerivWebSocketService {
       this.ws = null;
     }
     this.isIntentionalDisconnect = false;
-    this.stopFallbackStream();
     this.connect(true);
   }
 
@@ -464,9 +442,6 @@ class DerivWebSocketService {
     symbols.forEach((s) => this.activeSymbols.add(s));
     if (this.connectionState === 'connected') {
       this.flushSubscriptions();
-    } else {
-      // Seed initial diverse prices immediately so market cards show distinct, realistic prices
-      symbols.forEach((s) => this.seedFallbackHistory(s));
     }
   }
 
@@ -476,19 +451,16 @@ class DerivWebSocketService {
     const symbols = Array.from(this.activeSymbols);
     let index = 0;
 
-    // Send in batches of 2 every 60ms to stay safely within Deriv's 10 req/s threshold
+    // Send 1 request every 180ms to stay safely below Deriv's strict 10 req/s rate limit
     const processNext = () => {
       if (this.connectionState !== 'connected' || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
         return;
       }
 
-      for (let i = 0; i < 2 && index < symbols.length; i++) {
+      if (index < symbols.length) {
         const symbol = symbols[index++];
         this.requestTicks(symbol);
-      }
-
-      if (index < symbols.length) {
-        this.subscriptionQueueTimer = setTimeout(processNext, 60);
+        this.subscriptionQueueTimer = setTimeout(processNext, 180);
       }
     };
 
@@ -524,46 +496,22 @@ class DerivWebSocketService {
       this.authCallbacks.push(callback);
     }
 
-    // If connected, send authorize to real Deriv immediately
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.send({ authorize: token });
     } else {
-      // Force connection to real Deriv immediately
       this.connect(true);
     }
-
-    // Resilient timeout: If Deriv Cloudflare firewall (520) blocks direct WebSocket handshakes,
-    // ensure the user is authorized with their token saved so digit analysis and scanning continue.
-    setTimeout(() => {
-      if (!this.account.isAuthorized && this.authCallbacks.length > 0) {
-        const derivedId = token.startsWith('CR') || token.startsWith('VRTC')
-          ? token.substring(0, 8)
-          : `CR_${token.substring(0, 6).toUpperCase()}`;
-
-        this.account = {
-          isAuthorized: true,
-          token,
-          loginId: derivedId,
-          currency: 'USD',
-          balance: 10000.0,
-          isVirtual: false,
-          fullName: 'Deriv Authorized Account',
-        };
-        this.balanceListeners.forEach((l) => l(this.account));
-        this.notifyAuthCallbacks(true, undefined, this.account);
-      }
-    }, 4000);
   }
 
   public disconnectAccount() {
     this.account = {
       isAuthorized: false,
       token: undefined,
-      loginId: 'VRTC_DEMO',
+      loginId: '',
       currency: 'USD',
-      balance: 10000.0,
-      isVirtual: true,
-      fullName: 'Demo Trader',
+      balance: 0.0,
+      isVirtual: false,
+      fullName: '',
     };
     if (typeof window !== 'undefined') {
       localStorage.removeItem('deriv_api_token');
@@ -571,110 +519,33 @@ class DerivWebSocketService {
     this.balanceListeners.forEach((l) => l(this.account));
   }
 
-  public resetDemoBalance(amount: number = 10000.0) {
-    this.account.balance = amount;
-    this.balanceListeners.forEach((l) => l(this.account));
-  }
-
-  // --- Fallback Stream (Only activated if Deriv network is blocked or offline) ---
-  private startFallbackStream() {
-    if (this.fallbackTimer || this.connectionState === 'connected') return;
-    this.setState('fallback_live');
-    this.latencyMs = 18;
-    this.latencyListeners.forEach((l) => l(this.latencyMs));
-
-    // Seed historical fallback ticks with distinct per-market baseline prices
-    this.activeSymbols.forEach((symbol) => {
-      this.seedFallbackHistory(symbol);
-    });
-
-    this.fallbackTimer = setInterval(() => {
-      if (this.connectionState === 'connected') {
-        this.stopFallbackStream();
-        return;
-      }
-
-      this.activeSymbols.forEach((symbol) => {
-        const pipSize = this.getPipSizeForSymbol(symbol);
-        const currentPrice = this.currentFallbackPrices[symbol] || MARKET_BASELINE_PRICES[symbol] || 1000.0;
-        
-        // Proportional random walk based on actual volatility level
-        const volPct = symbol.includes('300') ? 0.0008 : symbol.includes('100') ? 0.0005 : 0.0003;
-        const delta = (Math.random() - 0.495) * (currentPrice * volPct);
-        const newPrice = Math.max(1, currentPrice + delta);
-        this.currentFallbackPrices[symbol] = newPrice;
-
-        const quoteStr = newPrice.toFixed(pipSize);
-        const lastDigit = parseInt(quoteStr.slice(-1), 10);
-        const epoch = Math.floor(Date.now() / 1000);
-
-        const tick: DerivTick = {
-          quote: newPrice,
-          pip_size: pipSize,
-          symbol,
-          epoch,
-          lastDigit: isNaN(lastDigit) ? 0 : lastDigit,
-          isEven: lastDigit % 2 === 0,
-          timeStr: new Date(epoch * 1000).toLocaleTimeString(),
-        };
-
-        this.tickListeners.forEach((l) => l(symbol, tick));
-      });
-    }, 1000);
-  }
-
-  private stopFallbackStream() {
-    if (this.fallbackTimer) {
-      clearInterval(this.fallbackTimer);
-      this.fallbackTimer = null;
-    }
-  }
-
-  private seedFallbackHistory(symbol: string) {
-    const pipSize = this.getPipSizeForSymbol(symbol);
-    let price = MARKET_BASELINE_PRICES[symbol] || 1000.0;
-    const historyTicks: DerivTick[] = [];
-    const now = Math.floor(Date.now() / 1000);
-
-    const volPct = symbol.includes('300') ? 0.0006 : 0.0003;
-    for (let i = 40; i >= 0; i--) {
-      price = Math.max(1, price + (Math.random() - 0.495) * (price * volPct));
-      const quoteStr = price.toFixed(pipSize);
-      const lastDigit = parseInt(quoteStr.slice(-1), 10);
-      const epoch = now - i;
-
-      historyTicks.push({
-        quote: price,
-        pip_size: pipSize,
-        symbol,
-        epoch,
-        lastDigit: isNaN(lastDigit) ? 0 : lastDigit,
-        isEven: lastDigit % 2 === 0,
-        timeStr: new Date(epoch * 1000).toLocaleTimeString(),
-      });
-    }
-
-    this.currentFallbackPrices[symbol] = price;
-    this.historyListeners.forEach((l) => l(symbol, historyTicks));
-  }
-
   private handleMessage(data: Record<string, any>) {
     const msgType = data.msg_type;
 
-    // Global Error Detection from Deriv
+    // Direct Error Detection from Official Deriv API
     if (data.error) {
       console.warn(`[DerivWS] Response error for ${msgType || 'request'}:`, data.error.message);
 
       if (msgType === 'authorize') {
-        const errorMsg = data.error.message || 'Authorization failed. Please check your token.';
+        const errorMsg = data.error.message || 'Authorization failed. Please check your Deriv API token.';
         this.account.isAuthorized = false;
         this.balanceListeners.forEach((l) => l(this.account));
         this.notifyAuthCallbacks(false, errorMsg);
         return;
       }
 
+      if (msgType === 'buy') {
+        const reqId = data.req_id;
+        const pendingBuy = reqId ? this.pendingBuyRequests.get(reqId) : undefined;
+        if (reqId) this.pendingBuyRequests.delete(reqId);
+        if (pendingBuy?.onComplete) {
+          pendingBuy.onComplete(false, undefined, 0, data.error.message || 'Trade execution rejected by Deriv');
+        }
+        return;
+      }
+
       if (data.error.code === 'RateLimit') {
-        console.warn('[DerivWS] Rate limit reached. Backing off requests...');
+        console.warn('[DerivWS] Rate limit reached. Backing off subscription queue...');
         return;
       }
 
@@ -683,6 +554,7 @@ class DerivWebSocketService {
       }
     }
 
+    // Ping / Latency
     if (msgType === 'ping') {
       if (this.pingStartTime > 0) {
         this.latencyMs = Math.max(1, Date.now() - this.pingStartTime);
@@ -691,7 +563,7 @@ class DerivWebSocketService {
       return;
     }
 
-    // Real Historical Ticks from Official Deriv API
+    // Real Historical Ticks from Official Deriv
     if (msgType === 'history' && data.history) {
       const symbol = data.echo_req?.ticks_history;
       if (!symbol) return;
@@ -723,12 +595,11 @@ class DerivWebSocketService {
         this.activeSubscriptions.set(symbol, data.subscription.id);
       }
 
-      // Send REAL ticks to subscribers (replaces any previous buffer completely)
       this.historyListeners.forEach((l) => l(symbol, parsedTicks));
       return;
     }
 
-    // Real Live Tick from Official Deriv API
+    // Real Live Tick from Official Deriv
     if (msgType === 'tick' && data.tick) {
       const rawTick = data.tick;
       const symbol = rawTick.symbol;
@@ -770,22 +641,90 @@ class DerivWebSocketService {
         balance: Number(auth.balance),
         isVirtual: Boolean(auth.is_virtual),
         fullName: auth.fullname || auth.loginid,
+        scopes: Array.isArray(auth.scopes) ? auth.scopes : [],
       };
 
       this.balanceListeners.forEach((l) => l(this.account));
+      // Continuous balance subscription
       this.send({ balance: 1, subscribe: 1 });
       this.notifyAuthCallbacks(true, undefined, this.account);
 
-      // Re-fetch all symbols with authorized session to guarantee exact real-time prices
+      // Refresh symbols in authorized session
       this.flushSubscriptions();
       return;
     }
 
-    // Real Balance updates from Official Deriv
+    // Real Live Balance Updates from Official Deriv
     if (msgType === 'balance' && data.balance) {
       this.account.balance = Number(data.balance.balance);
       this.account.currency = data.balance.currency || this.account.currency;
       this.balanceListeners.forEach((l) => l(this.account));
+      return;
+    }
+
+    // Real Buy Contract Response from Official Deriv
+    if (msgType === 'buy') {
+      const reqId = data.req_id;
+      const pendingBuy = reqId ? this.pendingBuyRequests.get(reqId) : undefined;
+      if (reqId) this.pendingBuyRequests.delete(reqId);
+
+      if (data.buy) {
+        const contractId = data.buy.contract_id;
+        if (data.buy.balance_after !== undefined) {
+          this.account.balance = Number(data.buy.balance_after);
+          this.balanceListeners.forEach((l) => l(this.account));
+        }
+
+        if (pendingBuy && contractId) {
+          this.pendingOpenContracts.set(contractId, pendingBuy);
+          // Subscribe to open contract settlement
+          this.send({
+            proposal_open_contract: 1,
+            contract_id: contractId,
+            subscribe: 1,
+          });
+        }
+      }
+      return;
+    }
+
+    // Real Contract Settlement from Official Deriv
+    if (msgType === 'proposal_open_contract' && data.proposal_open_contract) {
+      const poc = data.proposal_open_contract;
+      const contractId = poc.contract_id;
+      const pending = contractId ? this.pendingOpenContracts.get(contractId) : undefined;
+
+      if (poc.is_sold === 1 && pending) {
+        this.pendingOpenContracts.delete(contractId);
+        const won = poc.status === 'won';
+        const payout = Number(poc.payout || 0);
+        const exitQuote = Number(poc.exit_tick || poc.current_spot || 0);
+        const exitDisplay = poc.exit_tick_display_value || String(exitQuote);
+        const exitDigit = parseInt(exitDisplay.slice(-1), 10);
+        const symbol = poc.underlying || pending.symbol;
+        const pipSize = this.getPipSizeForSymbol(symbol);
+
+        const exitTick: DerivTick = {
+          quote: exitQuote,
+          pip_size: pipSize,
+          symbol,
+          epoch: poc.exit_tick_time || Math.floor(Date.now() / 1000),
+          lastDigit: isNaN(exitDigit) ? 0 : exitDigit,
+          isEven: exitDigit % 2 === 0,
+          timeStr: new Date((poc.exit_tick_time || Date.now() / 1000) * 1000).toLocaleTimeString(),
+        };
+
+        if (data.subscription?.id) {
+          this.send({ forget: data.subscription.id });
+        }
+
+        // Refresh balance after real contract settlement
+        this.send({ balance: 1 });
+
+        if (pending.onComplete) {
+          pending.onComplete(won, exitTick, payout, undefined, contractId);
+        }
+      }
       return;
     }
   }
@@ -802,27 +741,69 @@ class DerivWebSocketService {
     });
   }
 
+  // Real Money Contract Execution on Deriv
   public placeTrade(
     symbol: string,
     contractType: string,
     stake: number,
     durationTicks: number = 1,
-    onComplete?: (won: boolean, exitTick: DerivTick, payout: number) => void
+    barrier?: number,
+    onComplete?: (won: boolean, exitTick?: DerivTick, payout?: number, errorMsg?: string, contractId?: number) => void
   ) {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN && this.account.isAuthorized) {
+    if (!this.account.token || !this.account.isAuthorized) {
+      onComplete?.(false, undefined, 0, 'Please connect your Deriv API token with Trade scope to execute real money trades.');
+      return;
+    }
+
+    if (this.account.scopes && !this.account.scopes.includes('trade')) {
+      onComplete?.(false, undefined, 0, 'Your Deriv API token lacks "trade" permission. Please generate a new token with Trade scope enabled on Deriv.');
+      return;
+    }
+
+    const reqId = ++this.reqIdCounter;
+    this.pendingBuyRequests.set(reqId, {
+      symbol,
+      contractType,
+      stake,
+      onComplete,
+    });
+
+    const buyParams: Record<string, any> = {
+      amount: stake,
+      basis: 'stake',
+      contract_type: contractType,
+      currency: this.account.currency || 'USD',
+      duration: durationTicks,
+      duration_unit: 't',
+      symbol,
+    };
+
+    if (barrier !== undefined) {
+      buyParams.barrier = String(barrier);
+    }
+
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.send({
         buy: 1,
         price: stake,
-        parameters: {
-          amount: stake,
-          basis: 'stake',
-          contract_type: contractType,
-          currency: this.account.currency,
-          duration: durationTicks,
-          duration_unit: 't',
-          symbol,
-        },
+        parameters: buyParams,
+        req_id: reqId,
       });
+    } else {
+      this.connect(true);
+      setTimeout(() => {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+          this.send({
+            buy: 1,
+            price: stake,
+            parameters: buyParams,
+            req_id: reqId,
+          });
+        } else {
+          this.pendingBuyRequests.delete(reqId);
+          onComplete?.(false, undefined, 0, 'Deriv connection offline. Please check connection diagnostics.');
+        }
+      }, 1500);
     }
   }
 

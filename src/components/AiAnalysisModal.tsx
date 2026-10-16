@@ -5,23 +5,58 @@ import { X, Sparkles, BarChart3, ShieldCheck } from 'lucide-react';
 interface AiAnalysisModalProps {
   market: MarketSymbol | null;
   stats: DigitStats | null;
+  isAuthorized?: boolean;
   onClose: () => void;
   onPlaceTrade?: (
     symbol: string,
     contractType: 'DIGITEVEN' | 'DIGITODD' | 'DIGITOVER' | 'DIGITUNDER',
-    stake: number
+    stake: number,
+    barrier?: number,
+    onComplete?: (won: boolean, exitTick?: any, payout?: number, errorMsg?: string, contractId?: number) => void
   ) => void;
+  onOpenAccountModal?: () => void;
 }
 
 export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
   market,
   stats,
+  isAuthorized = false,
   onClose,
+  onPlaceTrade,
+  onOpenAccountModal,
 }) => {
+  const [stake, setStake] = React.useState<number>(1);
+  const [isExecuting, setIsExecuting] = React.useState<boolean>(false);
+  const [tradeMessage, setTradeMessage] = React.useState<string | null>(null);
+
   if (!market || !stats) return null;
 
   const digits = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
   const maxFreq = Math.max(...Object.values(stats.digitFrequency), 1);
+
+  const handleModalTrade = (contractType: 'DIGITEVEN' | 'DIGITODD') => {
+    if (!isAuthorized) {
+      onOpenAccountModal?.();
+      return;
+    }
+    if (!onPlaceTrade) return;
+
+    setIsExecuting(true);
+    setTradeMessage(null);
+
+    onPlaceTrade(market.id, contractType, stake, undefined, (won, exitTick, payout, errorMsg) => {
+      setIsExecuting(false);
+      if (errorMsg) {
+        setTradeMessage(`Trade Error: ${errorMsg}`);
+      } else {
+        setTradeMessage(
+          won
+            ? `Won! Payout: +$${((payout || 0) - stake).toFixed(2)} (Exit Digit: ${exitTick?.lastDigit})`
+            : `Lost: -$${stake.toFixed(2)} (Exit Digit: ${exitTick?.lastDigit})`
+        );
+      }
+    });
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
@@ -84,7 +119,7 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
             <p className="text-xs text-slate-300 mt-1.5">{stats.signal.reason}</p>
           </div>
 
-          <div className="flex sm:flex-col gap-1.5 shrink-0">
+          <div className="flex flex-col gap-2 shrink-0">
             <div className="px-3.5 py-2 rounded-xl bg-[#0b101e] border border-slate-800 text-left sm:text-right">
               <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block">Recommended Bias</span>
               <span className={`text-xs sm:text-sm font-extrabold font-mono uppercase ${
@@ -97,8 +132,38 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
                 {stats.signal.type === 'even' ? 'Even Digit (0,2,4,6,8)' : stats.signal.type === 'odd' ? 'Odd Digit (1,3,5,7,9)' : 'Neutral / Monitor'}
               </span>
             </div>
+
+            {onPlaceTrade && (
+              <div className="flex items-center gap-1.5">
+                <div className="flex items-center bg-[#0b101e] px-2 py-1 rounded-lg border border-slate-800 text-xs font-mono">
+                  <span className="text-slate-500 mr-1">$</span>
+                  <input
+                    type="number"
+                    min="0.35"
+                    step="0.5"
+                    value={stake}
+                    onChange={(e) => setStake(parseFloat(e.target.value) || 1)}
+                    className="w-12 bg-transparent text-white font-bold focus:outline-none"
+                  />
+                </div>
+                <button
+                  type="button"
+                  disabled={isExecuting}
+                  onClick={() => handleModalTrade(stats.signal.type === 'odd' ? 'DIGITODD' : 'DIGITEVEN')}
+                  className="px-3 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs flex items-center gap-1 transition-all disabled:opacity-50 shadow-md shadow-cyan-500/20"
+                >
+                  <span>{isExecuting ? 'Trading...' : `Trade ${stats.signal.type === 'odd' ? 'Odd' : 'Even'}`}</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
+
+        {tradeMessage && (
+          <div className="mt-2.5 p-2 rounded-xl bg-[#0b101e] border border-cyan-500/50 text-xs font-mono text-cyan-300">
+            {tradeMessage}
+          </div>
+        )}
 
         {/* 0-9 Digit Distribution Histogram */}
         <div className="mt-5">

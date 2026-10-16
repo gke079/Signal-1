@@ -11,6 +11,7 @@ import { AiAnalysisModal } from './components/AiAnalysisModal';
 import { TokenModal } from './components/TokenModal';
 import { SettingsModal } from './components/SettingsModal';
 import { ConnectionModal } from './components/ConnectionModal';
+import { TradeHistoryDrawer } from './components/TradeHistoryDrawer';
 import { derivWS, SUPPORTED_MARKETS, ConnectionState } from './services/derivWebSocket';
 import { audioService } from './services/audioAlerts';
 import { calculateDigitStats } from './utils/digitAnalysis';
@@ -18,18 +19,14 @@ import {
   DerivAccount,
   DerivTick,
   DigitStats,
-  MarketSymbol,
   ScanMode,
+  TradeOrder,
 } from './types/deriv';
 import {
-  Sparkles,
-  Activity,
-  Layers,
   Zap,
-  Info,
+  WifiOff,
   RefreshCw,
-  AlertTriangle,
-  Globe
+  Key
 } from 'lucide-react';
 
 export default function App() {
@@ -38,15 +35,19 @@ export default function App() {
   const [latencyMs, setLatencyMs] = useState<number>(0);
   const [isConnectionModalOpen, setIsConnectionModalOpen] = useState<boolean>(false);
 
-  // Deriv Account State
+  // Deriv Account State (starts clean, populated by real Deriv authorize API)
   const [account, setAccount] = useState<DerivAccount>({
     isAuthorized: false,
     currency: 'USD',
-    balance: 10000.0,
-    isVirtual: true,
-    loginId: 'VRTC_DEMO',
-    fullName: 'Demo Trader',
+    balance: 0.0,
+    isVirtual: false,
+    loginId: '',
+    fullName: '',
   });
+
+  // Trades History
+  const [trades, setTrades] = useState<TradeOrder[]>([]);
+  const [isTradeHistoryOpen, setIsTradeHistoryOpen] = useState<boolean>(false);
 
   // Scanner Config & Mode State
   const [scanMode, setScanMode] = useState<ScanMode>('even_odd');
@@ -80,7 +81,6 @@ export default function App() {
   const [ticksMap, setTicksMap] = useState<Record<string, DerivTick[]>>({});
   const lastAlertTimes = useRef<Record<string, number>>({});
 
-
   // Modals State
   const [isAccountModalOpen, setIsAccountModalOpen] = useState<boolean>(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState<boolean>(false);
@@ -93,7 +93,7 @@ export default function App() {
       .filter((m) => marketFilter === 'all' || m.category === marketFilter);
   }, [selectedMarketIds, marketFilter]);
 
-  // Calculate stats for all active markets
+  // Calculate stats for all active markets based on genuine ticks
   const marketStatsMap = useMemo(() => {
     const stats: Record<string, DigitStats> = {};
     for (const market of activeMarkets) {
@@ -139,7 +139,7 @@ export default function App() {
       });
     });
 
-    // Initiate WebSocket connection
+    // Initiate Real Deriv WebSocket connection
     derivWS.connect();
     derivWS.subscribeToSymbols(selectedMarketIds);
 
@@ -178,7 +178,6 @@ export default function App() {
   // Timer tick effect to update circular countdown rings smoothly
   useEffect(() => {
     const interval = setInterval(() => {
-      // Re-trigger render every 1s for the 25s countdown timer animation
       setTicksMap((prev) => ({ ...prev }));
     }, 1000);
     return () => clearInterval(interval);
@@ -190,6 +189,38 @@ export default function App() {
     audioService.setEnabled(nextState);
   };
 
+  // Real Money Contract Placement
+  const handlePlaceTrade = (
+    symbol: string,
+    contractType: 'DIGITEVEN' | 'DIGITODD' | 'DIGITOVER' | 'DIGITUNDER',
+    stake: number,
+    barrier?: number,
+    onComplete?: (won: boolean, exitTick?: any, payout?: number, errorMsg?: string, contractId?: number) => void
+  ) => {
+    derivWS.placeTrade(symbol, contractType, stake, 1, barrier, (won, exitTick, payout, errorMsg, contractId) => {
+      if (onComplete) {
+        onComplete(won, exitTick, payout, errorMsg, contractId);
+      }
+
+      if (contractId || errorMsg) {
+        const newTrade: TradeOrder = {
+          id: String(contractId || Date.now()),
+          symbol,
+          contractType,
+          stake,
+          payout: payout || 0,
+          status: errorMsg ? 'lost' : won ? 'won' : 'lost',
+          exitTick,
+          timestamp: Date.now(),
+          isSimulated: false,
+          contractId,
+          errorMsg,
+        };
+
+        setTrades((prev) => [...prev, newTrade]);
+      }
+    });
+  };
 
   const activeSignalsCount = useMemo(() => {
     return Object.values(marketStatsMap).filter((s) => s.signal.label.includes('ENTRY')).length;
@@ -207,6 +238,8 @@ export default function App() {
         onOpenAccountModal={() => setIsAccountModalOpen(true)}
         onOpenSettingsModal={() => setIsSettingsModalOpen(true)}
         onOpenConnectionModal={() => setIsConnectionModalOpen(true)}
+        onOpenTradeHistory={() => setIsTradeHistoryOpen(true)}
+        tradesCount={trades.length}
         scanMode={scanMode}
         onChangeScanMode={setScanMode}
         activeMarketsCount={activeMarkets.length}
@@ -214,28 +247,56 @@ export default function App() {
 
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-3 sm:p-6 space-y-4">
-        {/* Connection Notice Banner if in fallback or disconnected */}
-        {connectionState === 'fallback_live' && (
-          <div className="p-3 rounded-2xl bg-amber-950/40 border border-amber-800/60 shadow-lg flex flex-wrap items-center justify-between gap-2.5">
+        {/* Connection Notice if disconnected */}
+        {connectionState === 'disconnected' && (
+          <div className="p-3.5 rounded-2xl bg-rose-950/40 border border-rose-800/60 shadow-lg flex flex-wrap items-center justify-between gap-2.5">
             <div className="flex items-center gap-2.5">
-              <span className="p-1.5 rounded-lg bg-amber-500/20 text-amber-400">
-                <Globe className="w-4 h-4 animate-spin" />
+              <span className="p-2 rounded-xl bg-rose-500/20 text-rose-400">
+                <WifiOff className="w-5 h-5" />
               </span>
               <div>
-                <span className="text-xs font-bold text-amber-300 block">
-                  Synthetic Live Feed Active (Deriv WebSocket Handshake Blocked)
+                <span className="text-xs font-bold text-rose-300 block">
+                  Deriv WebSocket Disconnected
                 </span>
                 <span className="text-[11px] text-slate-300">
-                  Deriv returned Cloudflare Error 520 or blocked direct connection. Streaming realistic real-time ticks so digit analysis continues seamlessly.
+                  Attempting auto-reconnect to Deriv live feed...
                 </span>
               </div>
             </div>
 
             <button
-              onClick={() => setIsConnectionModalOpen(true)}
-              className="px-3 py-1 rounded-xl bg-amber-900/60 hover:bg-amber-800 border border-amber-700/80 text-amber-200 text-xs font-bold font-mono transition-all flex items-center gap-1.5"
+              onClick={() => derivWS.reconnect()}
+              className="px-3.5 py-1.5 rounded-xl bg-rose-900/60 hover:bg-rose-800 border border-rose-700/80 text-rose-200 text-xs font-bold font-mono transition-all flex items-center gap-1.5"
             >
-              <span>Diagnose / Retry WS</span>
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Reconnect Now</span>
+            </button>
+          </div>
+        )}
+
+        {/* Real Money Token Prompt Banner (if user hasn't authorized token yet) */}
+        {!account.isAuthorized && (
+          <div className="p-3.5 rounded-2xl bg-gradient-to-r from-cyan-950/40 via-[#0f182c] to-indigo-950/40 border border-cyan-800/50 shadow-lg flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-xl bg-cyan-500/20 text-cyan-400 shrink-0">
+                <Key className="w-5 h-5" />
+              </div>
+              <div>
+                <span className="text-xs sm:text-sm font-bold text-white block">
+                  Ready to trade real money on Deriv?
+                </span>
+                <span className="text-[11px] sm:text-xs text-slate-400">
+                  Connect your real Deriv API token (with <strong>Read</strong> &amp; <strong>Trade</strong> permissions) to execute buy contracts directly from this scanner.
+                </span>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setIsAccountModalOpen(true)}
+              className="px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-extrabold text-xs transition-all shadow-md shadow-cyan-500/25 flex items-center gap-1.5 shrink-0"
+            >
+              <Key className="w-4 h-4" />
+              <span>Connect Deriv Account</span>
             </button>
           </div>
         )}
@@ -252,7 +313,7 @@ export default function App() {
                   {activeSignalsCount} Active Entry Signal{activeSignalsCount > 1 ? 's' : ''} Detected
                 </span>
                 <span className="text-[11px] text-slate-300 font-mono">
-                  High probability digit entry skew ready for execution
+                  High probability digit entry skew ready for real contract execution
                 </span>
               </div>
             </div>
@@ -338,7 +399,7 @@ export default function App() {
           </div>
 
           <div className="text-xs font-mono text-slate-400 hidden sm:flex items-center gap-2">
-            <span>Showing: <strong className="text-white font-bold">{activeMarkets.length}</strong> markets</span>
+            <span>Live Streaming: <strong className="text-white font-bold">{activeMarkets.length}</strong> markets</span>
           </div>
         </div>
 
@@ -352,7 +413,7 @@ export default function App() {
         ) : (
           <div className="space-y-3 sm:space-y-4">
             {activeMarkets.map((market) => {
-              const stats = marketStatsMap[market.id] || calculateDigitStats(market.id, [], windowSize, minConfidence);
+              const stats = marketStatsMap[market.id] || calculateDigitStats(market.id, [], windowSize, minConfidence, market.pipSize);
               return (
                 <MarketCard
                   key={market.id}
@@ -360,6 +421,9 @@ export default function App() {
                   stats={stats}
                   scanMode={scanMode}
                   onOpenAnalysis={(sym) => setAnalyzingMarketId(sym)}
+                  isAuthorized={account.isAuthorized}
+                  onPlaceTrade={handlePlaceTrade}
+                  onOpenAccountModal={() => setIsAccountModalOpen(true)}
                 />
               );
             })}
@@ -372,8 +436,8 @@ export default function App() {
         <div className="max-w-7xl mx-auto flex items-center justify-between text-xs text-slate-400 font-mono">
           <div className="flex items-center gap-3">
             <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <strong className="text-slate-200">ws.derivws.com</strong>
+              <span className={`w-2 h-2 rounded-full ${connectionState === 'connected' ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'}`} />
+              <strong className="text-slate-200">{derivWS.getCurrentEndpoint().replace('wss://', '')}</strong>
             </span>
             <span className="hidden sm:inline">·</span>
             <span className="hidden sm:inline text-slate-400">
@@ -381,9 +445,18 @@ export default function App() {
             </span>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
+            {account.isAuthorized ? (
+              <span className="text-[11px] text-emerald-400 font-bold">
+                {account.isVirtual ? 'Demo Mode' : 'Real Money Active'} ({account.loginId})
+              </span>
+            ) : (
+              <span className="text-[11px] text-amber-400 font-medium">
+                Real Prices Streaming • Connect Token to Trade
+              </span>
+            )}
             <span className="text-[11px] text-slate-400">
-              Deriv Latency: <strong className="text-emerald-400 tabular-nums">{latencyMs}ms</strong>
+              Latency: <strong className="text-emerald-400 tabular-nums">{latencyMs}ms</strong>
             </span>
           </div>
         </div>
@@ -394,6 +467,12 @@ export default function App() {
         <AiAnalysisModal
           market={SUPPORTED_MARKETS.find((m) => m.id === analyzingMarketId) || null}
           stats={marketStatsMap[analyzingMarketId] || null}
+          isAuthorized={account.isAuthorized}
+          onPlaceTrade={handlePlaceTrade}
+          onOpenAccountModal={() => {
+            setAnalyzingMarketId(null);
+            setIsAccountModalOpen(true);
+          }}
           onClose={() => setAnalyzingMarketId(null)}
         />
       )}
@@ -404,10 +483,17 @@ export default function App() {
           account={account}
           onAuthorize={(token, cb) => derivWS.authorize(token, cb)}
           onDisconnect={() => derivWS.disconnectAccount()}
-          onResetDemo={() => derivWS.resetDemoBalance(10000.0)}
           onClose={() => setIsAccountModalOpen(false)}
         />
       )}
+
+      {/* Trade History Drawer */}
+      <TradeHistoryDrawer
+        isOpen={isTradeHistoryOpen}
+        onClose={() => setIsTradeHistoryOpen(false)}
+        trades={trades}
+        onClearHistory={() => setTrades([])}
+      />
 
       {/* Settings Modal */}
       {isSettingsModalOpen && (

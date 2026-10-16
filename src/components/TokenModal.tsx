@@ -1,12 +1,11 @@
 import React, { useState } from 'react';
 import { DerivAccount } from '../types/deriv';
-import { X, Key, CheckCircle2, Shield, ExternalLink, RotateCcw, AlertCircle, LogOut } from 'lucide-react';
+import { X, Key, CheckCircle2, Shield, ExternalLink, AlertCircle, LogOut, AlertTriangle } from 'lucide-react';
 
 interface TokenModalProps {
   account: DerivAccount;
   onAuthorize: (token: string, callback?: (success: boolean, errorMsg?: string, account?: DerivAccount) => void) => void;
   onDisconnect: () => void;
-  onResetDemo: () => void;
   onClose: () => void;
 }
 
@@ -14,13 +13,14 @@ export const TokenModal: React.FC<TokenModalProps> = ({
   account,
   onAuthorize,
   onDisconnect,
-  onResetDemo,
   onClose,
 }) => {
   const [tokenInput, setTokenInput] = useState<string>(account.token || '');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  const hasTradeScope = account.scopes ? account.scopes.includes('trade') : true;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,24 +32,16 @@ export const TokenModal: React.FC<TokenModalProps> = ({
     setSuccessMessage(null);
     setIsSubmitting(true);
 
-    const timer = setTimeout(() => {
-      setIsSubmitting(false);
-      setSuccessMessage('Token connected! Digit analysis & streaming active.');
-      setTimeout(() => {
-        onClose();
-      }, 1000);
-    }, 5000);
-
     onAuthorize(tokenInput.trim(), (success, errorMsg, acc) => {
-      clearTimeout(timer);
       setIsSubmitting(false);
       if (success && acc) {
-        setSuccessMessage(`Connected successfully to Deriv (${acc.loginId}). Live prices & balance synced!`);
+        const accountTypeStr = acc.isVirtual ? 'Demo Account' : 'Real Money Account';
+        setSuccessMessage(`Authorized as ${acc.loginId} (${accountTypeStr})! Live balance: $${acc.balance.toFixed(2)} ${acc.currency}`);
         setTimeout(() => {
           onClose();
-        }, 1200);
+        }, 1500);
       } else {
-        setErrorMessage(errorMsg || 'Failed to authenticate token with Deriv. Please check token permissions.');
+        setErrorMessage(errorMsg || 'Failed to authenticate with Deriv. Please ensure your token is active and valid.');
       }
     });
   };
@@ -63,8 +55,8 @@ export const TokenModal: React.FC<TokenModalProps> = ({
               <Key className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-white">Deriv Account & Real-Time Balance</h3>
-              <p className="text-xs text-slate-400">Connect your Deriv account for live streaming balance</p>
+              <h3 className="text-base font-bold text-white">Deriv Account & Real Money Trading</h3>
+              <p className="text-xs text-slate-400">Connect your Deriv API token for real execution &amp; balance</p>
             </div>
           </div>
           <button
@@ -75,36 +67,63 @@ export const TokenModal: React.FC<TokenModalProps> = ({
           </button>
         </div>
 
-        {/* Current Status Box */}
+        {/* Current Account Status Box */}
         <div className="mt-4 p-3.5 rounded-xl bg-[#0a0f1c] border border-slate-800/90">
           <div className="flex items-center justify-between">
-            <span className="text-xs text-slate-400 font-mono">Current Status:</span>
+            <span className="text-xs text-slate-400 font-mono">Deriv Connection:</span>
             {account.isAuthorized ? (
-              <span className="flex items-center gap-1.5 text-xs font-bold text-emerald-400">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                Authorized ({account.isVirtual ? 'Virtual Account' : 'Real Account'})
+              <span className={`flex items-center gap-1.5 text-xs font-bold ${account.isVirtual ? 'text-cyan-400' : 'text-emerald-400'}`}>
+                <CheckCircle2 className="w-4 h-4" />
+                {account.isVirtual ? 'Demo Account Connected' : 'Real Account Connected (Real Funds)'}
               </span>
             ) : (
-              <span className="text-xs font-medium text-amber-400">
-                Simulator Mode (Real Market Ticks Streaming)
+              <span className="text-xs font-medium text-slate-400">
+                Not Connected (Live Prices Streaming)
               </span>
             )}
           </div>
 
           <div className="mt-2.5 grid grid-cols-2 gap-2 text-xs font-mono">
             <div className="p-2 rounded-lg bg-slate-900/80 border border-slate-800">
-              <span className="text-[10px] text-slate-400 block">Login ID</span>
+              <span className="text-[10px] text-slate-400 block">Account Login ID</span>
               <span className="text-slate-100 font-bold truncate block">
-                {account.loginId || 'Guest Trader'}
+                {account.loginId || 'No token connected'}
               </span>
             </div>
             <div className="p-2 rounded-lg bg-slate-900/80 border border-slate-800">
-              <span className="text-[10px] text-slate-400 block">Live Balance</span>
+              <span className="text-[10px] text-slate-400 block">Real Balance</span>
               <span className="text-emerald-400 font-bold text-sm tabular-nums block">
                 ${account.balance.toFixed(2)} {account.currency}
               </span>
             </div>
           </div>
+
+          {account.isAuthorized && account.scopes && (
+            <div className="mt-2 pt-2 border-t border-slate-800/60 flex items-center justify-between text-[11px] font-mono">
+              <span className="text-slate-400">Token Permissions:</span>
+              <div className="flex items-center gap-1">
+                {account.scopes.map((sc) => (
+                  <span
+                    key={sc}
+                    className={`px-1.5 py-0.2 rounded uppercase text-[9px] font-bold ${
+                      sc === 'trade'
+                        ? 'bg-emerald-950 text-emerald-300 border border-emerald-700/60'
+                        : 'bg-slate-800 text-slate-300'
+                    }`}
+                  >
+                    {sc}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {account.isAuthorized && !hasTradeScope && (
+            <div className="mt-2 p-2 rounded-lg bg-amber-950/40 border border-amber-800/60 flex items-center gap-2 text-amber-300 text-xs">
+              <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
+              <span>Warning: This token lacks <strong>Trade</strong> scope. You will not be able to execute buy contracts until Trade is checked.</span>
+            </div>
+          )}
         </div>
 
         {/* Token Input Form */}
@@ -115,10 +134,10 @@ export const TokenModal: React.FC<TokenModalProps> = ({
             </label>
             <div className="relative">
               <input
-                type="text"
+                type="password"
                 value={tokenInput}
                 onChange={(e) => setTokenInput(e.target.value)}
-                placeholder="e.g. a1-Xk9Lp..."
+                placeholder="Paste your Deriv API token here"
                 className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs font-mono text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition-colors"
               />
             </div>
@@ -145,10 +164,10 @@ export const TokenModal: React.FC<TokenModalProps> = ({
               <Key className={`w-4 h-4 ${isSubmitting ? 'animate-spin' : ''}`} />
               <span>
                 {isSubmitting
-                  ? 'Connecting to Deriv...'
+                  ? 'Verifying with Deriv...'
                   : account.isAuthorized
                   ? 'Update Token'
-                  : 'Connect Account'}
+                  : 'Authorize & Connect'}
               </span>
             </button>
 
@@ -162,30 +181,26 @@ export const TokenModal: React.FC<TokenModalProps> = ({
                 <span>Disconnect</span>
               </button>
             )}
-
-            <button
-              type="button"
-              onClick={onResetDemo}
-              className="py-2 px-3 rounded-xl bg-[#141c2e] hover:bg-[#1a253c] border border-slate-700 text-slate-300 text-xs font-semibold transition-colors flex items-center gap-1.5"
-              title="Reset Demo Balance to $10,000"
-            >
-              <RotateCcw className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Reset $10k</span>
-            </button>
           </div>
         </form>
 
-        {/* Instructions */}
+        {/* Real Deriv Token Instructions */}
         <div className="mt-4 pt-4 border-t border-slate-800 text-xs text-slate-400 space-y-2">
           <div className="flex items-center gap-1 text-cyan-400 font-semibold">
             <Shield className="w-3.5 h-3.5" />
-            <span>How to generate a Deriv API Token:</span>
+            <span>How to generate a Real Money Deriv API Token:</span>
           </div>
           <ol className="list-decimal list-inside space-y-1 text-slate-400 text-[11px] leading-relaxed">
-            <li>Log in to your Deriv account (app.deriv.com).</li>
+            <li>Log in to your Deriv account at <strong className="text-white">app.deriv.com</strong>.</li>
+            <li>Switch to your <strong>Real Account</strong> (e.g. CRxxxx) in the top-right account dropdown if you want to trade real money, or Demo account (VRTCxxxx).</li>
             <li>Go to <strong>Manage account &gt; Security &amp; safety &gt; API token</strong>.</li>
-            <li>Enter a name and check scopes (<strong>Read</strong> for balance &amp; ticks, <strong>Trade</strong> for automated buy contracts).</li>
-            <li>Copy and paste your generated token above.</li>
+            <li>Give it a token name (e.g. <code className="text-cyan-300">DigitScanner</code>) and select:
+              <ul className="list-disc list-inside ml-4 mt-0.5 space-y-0.5 text-slate-300">
+                <li><strong className="text-emerald-400">Read</strong> (to fetch live account balance and verify details)</li>
+                <li><strong className="text-emerald-400">Trade</strong> (to execute real contract orders when you click Trade)</li>
+              </ul>
+            </li>
+            <li>Click <strong>Create</strong>, copy your token, and paste it above.</li>
           </ol>
           <a
             href="https://app.deriv.com/account/api-token"
@@ -193,7 +208,7 @@ export const TokenModal: React.FC<TokenModalProps> = ({
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1 text-cyan-400 hover:text-cyan-300 text-[11px] hover:underline pt-1"
           >
-            <span>Open Deriv API Tokens page</span>
+            <span>Open Deriv API Tokens page directly</span>
             <ExternalLink className="w-3 h-3" />
           </a>
         </div>

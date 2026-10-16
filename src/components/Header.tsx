@@ -6,11 +6,11 @@ import {
   VolumeX,
   SlidersHorizontal,
   Wallet,
-  Activity,
   Layers,
   Sparkles,
   ArrowRightLeft,
-  Globe
+  History,
+  Key
 } from 'lucide-react';
 import { DerivAccount, ScanMode } from '../types/deriv';
 import { ConnectionState } from '../services/derivWebSocket';
@@ -24,6 +24,8 @@ interface HeaderProps {
   onOpenAccountModal: () => void;
   onOpenSettingsModal: () => void;
   onOpenConnectionModal: () => void;
+  onOpenTradeHistory: () => void;
+  tradesCount: number;
   scanMode: ScanMode;
   onChangeScanMode: (mode: ScanMode) => void;
   activeMarketsCount: number;
@@ -38,12 +40,13 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAccountModal,
   onOpenSettingsModal,
   onOpenConnectionModal,
+  onOpenTradeHistory,
+  tradesCount,
   scanMode,
   onChangeScanMode,
   activeMarketsCount,
 }) => {
   const isConnected = connectionState === 'connected';
-  const isFallback = connectionState === 'fallback_live';
 
   const formatBalance = (amount: number, currency: string) => {
     return new Intl.NumberFormat('en-US', {
@@ -71,13 +74,13 @@ export const Header: React.FC<HeaderProps> = ({
                 Deriv Digit Tool
               </h1>
               <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-cyan-950/80 text-cyan-400 border border-cyan-800/60 hidden sm:inline-block">
-                LIVE WS
+                REAL WS
               </span>
             </div>
             <div className="flex items-center gap-1.5 text-[11px] text-slate-400 font-mono">
               <span>{activeMarketsCount} Active Markets</span>
               <span>·</span>
-              <span>v3 API</span>
+              <span>Deriv v3</span>
             </div>
           </div>
         </div>
@@ -127,11 +130,9 @@ export const Header: React.FC<HeaderProps> = ({
             className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl border text-xs font-mono transition-all hover:scale-105 active:scale-95 ${
               isConnected
                 ? 'bg-emerald-950/40 border-emerald-800/60 text-emerald-400 hover:bg-emerald-900/50'
-                : isFallback
-                ? 'bg-amber-950/40 border-amber-800/60 text-amber-300 hover:bg-amber-900/50'
                 : 'bg-rose-950/40 border-rose-800/60 text-rose-400 hover:bg-rose-900/50'
             }`}
-            title="Click for Connection Diagnostics & Reconnect"
+            title="Click for Connection Diagnostics & Switch Endpoint"
           >
             {isConnected ? (
               <>
@@ -139,37 +140,61 @@ export const Header: React.FC<HeaderProps> = ({
                 <span className="hidden sm:inline font-bold">Deriv WS</span>
                 <span className="hidden md:inline tabular-nums text-[10px] text-emerald-300">({latencyMs}ms)</span>
               </>
-            ) : isFallback ? (
-              <>
-                <Globe className="w-3.5 h-3.5 text-amber-400 animate-spin" />
-                <span className="font-bold">Live Feed</span>
-                <span className="hidden lg:inline text-[10px] text-amber-200/80">(Deriv 520)</span>
-              </>
             ) : (
               <>
                 <WifiOff className="w-3.5 h-3.5 text-rose-400" />
-                <span className="hidden sm:inline font-bold">Disconnected</span>
+                <span className="hidden sm:inline font-bold">Connecting...</span>
               </>
+            )}
+          </button>
+
+          {/* Trade History Drawer Button */}
+          <button
+            onClick={onOpenTradeHistory}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#141c2e] hover:bg-[#1a253c] border border-slate-700/80 text-xs font-mono text-slate-300 transition-all shadow-sm"
+            title="Open Executed Trades History"
+          >
+            <History className="w-3.5 h-3.5 text-cyan-400" />
+            <span className="hidden md:inline font-semibold">Trades</span>
+            {tradesCount > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full bg-cyan-500 text-slate-950 text-[10px] font-black">
+                {tradesCount}
+              </span>
             )}
           </button>
 
           {/* Account Balance Button */}
           <button
             onClick={onOpenAccountModal}
-            className="flex items-center gap-2 px-2.5 sm:px-3 py-1.5 rounded-xl bg-[#141c2e] hover:bg-[#1a253c] border border-slate-700/80 transition-all text-left shadow-sm group"
+            className={`flex items-center gap-2 px-2.5 sm:px-3 py-1.5 rounded-xl border transition-all text-left shadow-sm group ${
+              account.isAuthorized
+                ? account.isVirtual
+                  ? 'bg-cyan-950/40 border-cyan-800/80 hover:bg-cyan-900/40'
+                  : 'bg-emerald-950/40 border-emerald-800/80 hover:bg-emerald-900/40'
+                : 'bg-[#141c2e] hover:bg-[#1a253c] border-amber-600/60'
+            }`}
+            title="Manage Deriv Account & API Token"
           >
-            <Wallet className="w-3.5 h-3.5 text-cyan-400 group-hover:scale-110 transition-transform" />
+            {account.isAuthorized ? (
+              <Wallet className={`w-3.5 h-3.5 ${account.isVirtual ? 'text-cyan-400' : 'text-emerald-400'} group-hover:scale-110 transition-transform`} />
+            ) : (
+              <Key className="w-3.5 h-3.5 text-amber-400 group-hover:scale-110 transition-transform" />
+            )}
             <div className="flex flex-col">
               <span className="text-[10px] text-slate-400 leading-none flex items-center gap-1">
                 {account.isAuthorized ? (
-                  <span className="text-emerald-400 font-semibold">{account.isVirtual ? 'DEMO' : 'REAL'}</span>
+                  <span className={`font-black ${account.isVirtual ? 'text-cyan-400' : 'text-emerald-400'}`}>
+                    {account.isVirtual ? 'DEMO' : 'REAL MONEY'}
+                  </span>
                 ) : (
-                  <span className="text-amber-400 font-medium">SIMULATOR</span>
+                  <span className="text-amber-400 font-bold">CONNECT TOKEN</span>
                 )}
-                <span className="hidden lg:inline">· {account.loginId || 'Guest'}</span>
+                {account.loginId && (
+                  <span className="hidden lg:inline text-slate-300">· {account.loginId}</span>
+                )}
               </span>
               <span className="text-xs sm:text-sm font-bold font-mono text-white tabular-nums leading-tight">
-                {formatBalance(account.balance, account.currency)}
+                {account.isAuthorized ? formatBalance(account.balance, account.currency) : 'Real Trading'}
               </span>
             </div>
           </button>

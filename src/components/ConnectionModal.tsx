@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ConnectionState, DERIV_ENDPOINTS } from '../services/derivWebSocket';
-import { X, Wifi, WifiOff, AlertTriangle, RefreshCw, CheckCircle2, ShieldAlert, Globe } from 'lucide-react';
+import { X, Wifi, WifiOff, RefreshCw, CheckCircle2, ShieldAlert } from 'lucide-react';
 
 interface ConnectionModalProps {
   connectionState: ConnectionState;
@@ -38,7 +38,6 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
   };
 
   const isConnected = connectionState === 'connected';
-  const isFallback = connectionState === 'fallback_live';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
@@ -50,22 +49,18 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
               className={`p-2 rounded-xl border ${
                 isConnected
                   ? 'bg-emerald-950/80 border-emerald-800 text-emerald-400'
-                  : isFallback
-                  ? 'bg-amber-950/80 border-amber-800 text-amber-400'
                   : 'bg-rose-950/80 border-rose-800 text-rose-400'
               }`}
             >
               {isConnected ? (
                 <Wifi className="w-5 h-5 text-emerald-400" />
-              ) : isFallback ? (
-                <Globe className="w-5 h-5 text-amber-400" />
               ) : (
                 <WifiOff className="w-5 h-5 text-rose-400" />
               )}
             </div>
             <div>
-              <h3 className="text-base font-bold text-white">WebSocket Diagnostics</h3>
-              <p className="text-xs text-slate-400">Deriv network connection &amp; fallback feed status</p>
+              <h3 className="text-base font-bold text-white">Deriv Real-Time WebSocket Diagnostics</h3>
+              <p className="text-xs text-slate-400">Direct streaming connection to official Deriv infrastructure</p>
             </div>
           </div>
           <button
@@ -79,66 +74,43 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
         {/* Current Status Overview */}
         <div className="mt-4 p-3.5 rounded-xl bg-[#0a0f1c] border border-slate-800/90 font-mono text-xs">
           <div className="flex items-center justify-between">
-            <span className="text-slate-400">Connection Feed:</span>
+            <span className="text-slate-400">Live Socket Status:</span>
             {isConnected ? (
               <span className="text-emerald-400 font-bold flex items-center gap-1.5">
                 <CheckCircle2 className="w-4 h-4" />
-                Live Deriv Official WS ({latencyMs}ms)
-              </span>
-            ) : isFallback ? (
-              <span className="text-amber-400 font-bold flex items-center gap-1.5">
-                <Globe className="w-4 h-4 animate-spin" />
-                Active (Synthetic Live Feed)
+                Connected to Official Deriv WS ({latencyMs}ms)
               </span>
             ) : (
               <span className="text-rose-400 font-bold flex items-center gap-1.5">
                 <WifiOff className="w-4 h-4" />
-                Disconnected
+                Connecting / Disconnected
               </span>
             )}
           </div>
 
           <div className="mt-2.5 space-y-1 text-[11px] text-slate-300">
             <div>
-              <span className="text-slate-500">Endpoint: </span>
+              <span className="text-slate-500">Active Endpoint: </span>
               <span className="text-cyan-400 break-all">{currentEndpoint}</span>
             </div>
             <div>
-              <span className="text-slate-500">App ID: </span>
+              <span className="text-slate-500">Registered App ID: </span>
               <span className="text-white font-bold">{initialAppId}</span>
             </div>
+            {errorReason && (
+              <div className="text-rose-400 pt-1">
+                <span className="text-slate-500">Last Error: </span>
+                <span>{errorReason}</span>
+              </div>
+            )}
           </div>
         </div>
-
-        {/* Diagnostic Explanation (Why is it disconnected?) */}
-        {!isConnected && (
-          <div className="mt-4 p-3.5 rounded-xl bg-amber-950/20 border border-amber-800/50 space-y-2 text-xs">
-            <div className="flex items-center gap-1.5 font-bold text-amber-300">
-              <ShieldAlert className="w-4 h-4 shrink-0 text-amber-400" />
-              <span>Why is the Deriv WebSocket disconnected?</span>
-            </div>
-            <ul className="list-disc list-inside space-y-1.5 text-slate-300 text-[11px] leading-relaxed">
-              <li>
-                <strong className="text-white">Cloudflare Error 520 / Firewall:</strong> Deriv uses Cloudflare protection which rejects or closes direct WebSocket handshakes from certain countries, datacenters, and sandbox iframes.
-              </li>
-              <li>
-                <strong className="text-white">Ad-Blockers &amp; Privacy Shields:</strong> Extensions like Brave Shields, uBlock Origin, or AdBlock often block domains matching <code className="text-cyan-300">*.derivws.com</code> or <code className="text-cyan-300">*.binaryws.com</code>.
-              </li>
-              <li>
-                <strong className="text-white">Regional Trading Restrictions:</strong> Deriv restricts access in certain jurisdictions (e.g. USA, UK, parts of EU).
-              </li>
-            </ul>
-            <div className="pt-1 text-[11px] text-amber-200/90 bg-amber-950/40 p-2 rounded-lg border border-amber-900/60">
-              💡 <strong>Automatic Protection:</strong> The app automatically streams realistic 1-second synthetic market ticks so your digit scanner, even/odd prediction, and trading simulation continue without interruption.
-            </div>
-          </div>
-        )}
 
         {/* Endpoint Switcher */}
         <div className="mt-4 space-y-3">
           <div>
             <label className="block text-xs font-semibold text-slate-200 mb-1.5">
-              Switch Deriv WebSocket Endpoint:
+              Available Deriv WebSocket Endpoints:
             </label>
             <div className="space-y-1.5">
               {DERIV_ENDPOINTS.map((ep, idx) => (
@@ -165,7 +137,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
 
           <div>
             <label className="block text-xs font-semibold text-slate-200 mb-1">
-              App ID:
+              Custom Deriv App ID (Default: 1089):
             </label>
             <input
               type="text"
@@ -183,7 +155,7 @@ export const ConnectionModal: React.FC<ConnectionModalProps> = ({
               className="flex-1 py-2 px-4 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs transition-colors flex items-center justify-center gap-1.5 shadow-md shadow-cyan-500/20 disabled:opacity-50"
             >
               <RefreshCw className={`w-4 h-4 ${isRetrying ? 'animate-spin' : ''}`} />
-              <span>{isRetrying ? 'Connecting...' : 'Retry Deriv Connection'}</span>
+              <span>{isRetrying ? 'Connecting...' : 'Reconnect Deriv WebSocket'}</span>
             </button>
             <button
               onClick={onClose}

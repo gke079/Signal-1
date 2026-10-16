@@ -59,6 +59,7 @@ export interface DerivAccount {
   balance: number;
   isVirtual: boolean;
   fullName?: string;
+  scopes?: string[];
 }
 
 export interface TradeOrder {
@@ -72,6 +73,8 @@ export interface TradeOrder {
   exitTick?: DerivTick;
   timestamp: number;
   isSimulated: boolean;
+  contractId?: number;
+  errorMsg?: string;
 }
 
 export type ScanMode = 'even_odd' | 'over_under' | 'matches_differs' | 'digit_matrix';

@@ -1,17 +1,21 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { DigitStats, MarketSymbol, ScanMode } from '../types/deriv';
-import { Sparkles } from 'lucide-react';
+import { Sparkles, ArrowUpRight, CheckCircle2, XCircle, TrendingUp, Zap, Key, ArrowRightLeft } from 'lucide-react';
 
 interface MarketCardProps {
   market: MarketSymbol;
   stats: DigitStats;
   scanMode: ScanMode;
   onOpenAnalysis: (symbol: string) => void;
-  onPlaceTrade?: (
+  isAuthorized: boolean;
+  onPlaceTrade: (
     symbol: string,
     contractType: 'DIGITEVEN' | 'DIGITODD' | 'DIGITOVER' | 'DIGITUNDER',
-    stake: number
+    stake: number,
+    barrier?: number,
+    onComplete?: (won: boolean, exitTick?: any, payout?: number, errorMsg?: string, contractId?: number) => void
   ) => void;
+  onOpenAccountModal: () => void;
 }
 
 export const MarketCard: React.FC<MarketCardProps> = ({
@@ -19,8 +23,24 @@ export const MarketCard: React.FC<MarketCardProps> = ({
   stats,
   scanMode,
   onOpenAnalysis,
+  isAuthorized,
+  onPlaceTrade,
+  onOpenAccountModal,
 }) => {
   const { signal, evenPercent, oddPercent, underPercent, overPercent, ticks, countdownSec, currentStreak } = stats;
+
+  const [quickStake, setQuickStake] = useState<number>(1);
+  const [customStake, setCustomStake] = useState<string>('1');
+  const [barrier, setBarrier] = useState<number>(4);
+  const [isTrading, setIsTrading] = useState<boolean>(false);
+  const [lastResult, setLastResult] = useState<{
+    won: boolean;
+    payout: number;
+    stake: number;
+    exitDigit?: number;
+    contractId?: number;
+    errorMsg?: string;
+  } | null>(null);
 
   const isEvenSignal = signal.type === 'even' && signal.label.includes('ENTRY');
   const isOddSignal = signal.type === 'odd' && signal.label.includes('ENTRY');
@@ -36,6 +56,54 @@ export const MarketCard: React.FC<MarketCardProps> = ({
   const radius = 22;
   const circumference = 2 * Math.PI * radius;
   const strokeDashoffset = circumference - (progressPercent / 100) * circumference;
+
+  const handleStakeSelect = (val: number) => {
+    setQuickStake(val);
+    setCustomStake(String(val));
+  };
+
+  const handleCustomStakeChange = (valStr: string) => {
+    setCustomStake(valStr);
+    const num = parseFloat(valStr);
+    if (!isNaN(num) && num > 0) {
+      setQuickStake(num);
+    }
+  };
+
+  const handleExecuteTrade = (contractType: 'DIGITEVEN' | 'DIGITODD' | 'DIGITOVER' | 'DIGITUNDER') => {
+    if (!isAuthorized) {
+      onOpenAccountModal();
+      return;
+    }
+
+    const stakeVal = parseFloat(customStake) || quickStake || 1;
+    if (stakeVal <= 0) return;
+
+    setIsTrading(true);
+    setLastResult(null);
+
+    onPlaceTrade(
+      market.id,
+      contractType,
+      stakeVal,
+      scanMode === 'over_under' ? barrier : undefined,
+      (won, exitTick, payout, errorMsg, contractId) => {
+        setIsTrading(false);
+        setLastResult({
+          won,
+          payout: payout || 0,
+          stake: stakeVal,
+          exitDigit: exitTick?.lastDigit,
+          contractId,
+          errorMsg,
+        });
+
+        setTimeout(() => {
+          setLastResult(null);
+        }, 8000);
+      }
+    );
+  };
 
   return (
     <div className="relative overflow-hidden rounded-2xl bg-[#0f1626]/90 border border-slate-800 hover:border-slate-700/80 p-3.5 sm:p-4.5 transition-all shadow-lg hover:shadow-cyan-950/20 backdrop-blur-sm group">
@@ -79,7 +147,7 @@ export const MarketCard: React.FC<MarketCardProps> = ({
 
         {/* Live Price Quote & AI Trigger */}
         <div className="flex items-center gap-2">
-          {/* Prominent Live Price Badge to compare with Deriv */}
+          {/* Prominent Live Price Badge from Real Deriv WS */}
           <div className="flex items-center gap-1.5 bg-[#0a0f1c] px-3 py-1.5 rounded-xl border border-slate-700/80 shadow-inner">
             <span className="text-[10px] text-slate-400 uppercase font-mono font-medium">Price:</span>
             {stats.currentPrice > 0 ? (
@@ -99,7 +167,7 @@ export const MarketCard: React.FC<MarketCardProps> = ({
                 </span>
               </div>
             ) : (
-              <span className="text-xs text-slate-500 font-mono">Syncing...</span>
+              <span className="text-xs text-cyan-400 font-mono animate-pulse">Connecting WS...</span>
             )}
           </div>
 
@@ -148,55 +216,42 @@ export const MarketCard: React.FC<MarketCardProps> = ({
                 style={{ transition: 'stroke-dashoffset 0.8s ease' }}
               />
             </svg>
-            <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-              <span className="text-sm font-extrabold font-mono text-white tabular-nums leading-none">
-                {countdownSec}
+            <div className="absolute inset-0 flex flex-col items-center justify-center font-mono">
+              <span className="text-sm font-black text-white leading-none tabular-nums">
+                {countdownSec}s
               </span>
-              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter mt-0.5">
-                SEC
+              <span className="text-[8px] text-slate-400 uppercase tracking-tighter scale-90">
+                CYCLE
               </span>
             </div>
           </div>
 
           <div className="flex flex-col min-w-0">
-            {/* Status / Prediction Badge */}
-            {isEvenSignal ? (
-              <div className="flex items-center gap-1.5">
-                <span className="px-2.5 py-0.5 rounded-md bg-emerald-500 text-slate-950 font-black text-xs uppercase tracking-wide shadow-sm shadow-emerald-500/50">
-                  EVEN
-                </span>
-                <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wide">
-                  ENTRY {signal.strength}%
-                </span>
-              </div>
-            ) : isOddSignal ? (
-              <div className="flex items-center gap-1.5">
-                <span className="px-2.5 py-0.5 rounded-md bg-fuchsia-500 text-white font-black text-xs uppercase tracking-wide shadow-sm shadow-fuchsia-500/50">
-                  ODD
-                </span>
-                <span className="text-[11px] font-bold text-fuchsia-400 uppercase tracking-wide">
-                  ENTRY {signal.strength}%
-                </span>
-              </div>
-            ) : scanMode === 'over_under' && (isOverSignal || isUnderSignal) ? (
-              <div className="flex items-center gap-1.5">
-                <span className={`px-2.5 py-0.5 rounded-md font-black text-xs uppercase tracking-wide ${
-                  isOverSignal ? 'bg-blue-500 text-white' : 'bg-cyan-500 text-slate-950'
-                }`}>
-                  {isOverSignal ? 'OVER (5-9)' : 'UNDER (0-4)'}
-                </span>
-                <span className="text-[11px] font-bold text-cyan-300">
-                  ENTRY {isOverSignal ? overPercent : underPercent}%
-                </span>
-              </div>
-            ) : (
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs font-extrabold text-cyan-300 tracking-wider uppercase">
-                  SCANNING
-                </span>
-                <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
-              </div>
-            )}
+            <div className="flex items-center gap-1.5">
+              <span
+                className={`text-xs font-black tracking-wider uppercase px-2 py-0.5 rounded-lg border flex items-center gap-1 ${
+                  isEvenSignal
+                    ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/50 shadow-sm shadow-emerald-500/20'
+                    : isOddSignal
+                    ? 'bg-fuchsia-950/80 text-fuchsia-300 border-fuchsia-500/50 shadow-sm shadow-fuchsia-500/20'
+                    : isOverSignal
+                    ? 'bg-blue-950/80 text-blue-300 border-blue-500/50'
+                    : isUnderSignal
+                    ? 'bg-teal-950/80 text-teal-300 border-teal-500/50'
+                    : 'bg-slate-900 text-slate-400 border-slate-800'
+                }`}
+              >
+                {isEvenSignal || isOddSignal || isOverSignal || isUnderSignal ? (
+                  <Zap className="w-3 h-3 text-current" />
+                ) : (
+                  <TrendingUp className="w-3 h-3 text-slate-500" />
+                )}
+                <span>{signal.label}</span>
+              </span>
+              <span className="text-xs font-mono font-bold text-slate-300">
+                {signal.strength}%
+              </span>
+            </div>
             <span className="text-[11px] text-slate-400 font-mono mt-0.5 truncate">
               {stats.totalCount} ticks · 25s window
             </span>
@@ -214,7 +269,7 @@ export const MarketCard: React.FC<MarketCardProps> = ({
 
           <div className="flex items-center gap-1.5 overflow-x-auto py-1">
             {recentTicks.length === 0 ? (
-              <div className="text-xs text-slate-400 py-1 font-mono">Awaiting tick stream from Deriv...</div>
+              <div className="text-xs text-cyan-400 py-1 font-mono animate-pulse">Awaiting tick stream from Deriv...</div>
             ) : (
               recentTicks.map((t, idx) => {
                 const isLatest = idx === recentTicks.length - 1;
@@ -290,6 +345,184 @@ export const MarketCard: React.FC<MarketCardProps> = ({
         </div>
       </div>
 
+      {/* Real Trade Execution Action Bar */}
+      <div className="mt-3 pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2.5">
+        {/* Stake Selector */}
+        <div className="flex items-center gap-1.5 text-xs font-mono">
+          <span className="text-slate-400 text-[11px] mr-1 hidden sm:inline">Stake:</span>
+          {[0.5, 1, 2, 5, 10, 20].map((val) => (
+            <button
+              key={val}
+              type="button"
+              onClick={() => handleStakeSelect(val)}
+              className={`px-2 py-1 rounded-lg text-xs font-bold transition-all ${
+                quickStake === val && customStake === String(val)
+                  ? 'bg-cyan-500 text-slate-950 font-black shadow-sm shadow-cyan-500/30'
+                  : 'bg-[#141c2e] text-slate-400 hover:text-white border border-slate-800'
+              }`}
+            >
+              ${val}
+            </button>
+          ))}
+
+          {/* Custom Stake Input */}
+          <div className="relative flex items-center ml-1">
+            <span className="absolute left-2 text-[10px] text-slate-400">$</span>
+            <input
+              type="number"
+              min="0.35"
+              step="0.5"
+              value={customStake}
+              onChange={(e) => handleCustomStakeChange(e.target.value)}
+              className="w-16 px-1.5 pl-4 py-0.5 rounded-lg bg-[#0b101e] border border-slate-700 text-xs font-mono text-white text-right focus:outline-none focus:border-cyan-400"
+              title="Enter custom stake amount"
+            />
+          </div>
+        </div>
+
+        {/* Trade Buttons */}
+        <div className="flex items-center gap-2">
+          {!isAuthorized ? (
+            <button
+              type="button"
+              onClick={onOpenAccountModal}
+              className="px-3.5 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 text-amber-300 font-bold text-xs flex items-center gap-1.5 transition-all shadow-sm"
+            >
+              <Key className="w-3.5 h-3.5" />
+              <span>Connect Deriv Token to Trade</span>
+            </button>
+          ) : scanMode === 'over_under' ? (
+            <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1 bg-[#141c2e] px-2 py-1 rounded-xl border border-slate-800 text-xs font-mono">
+                <span className="text-slate-400 text-[10px]">Barrier:</span>
+                <select
+                  value={barrier}
+                  onChange={(e) => setBarrier(parseInt(e.target.value, 10))}
+                  className="bg-transparent text-white font-bold focus:outline-none cursor-pointer"
+                >
+                  {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((b) => (
+                    <option key={b} value={b} className="bg-slate-900 text-white">
+                      {b}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <button
+                type="button"
+                disabled={isTrading}
+                onClick={() => handleExecuteTrade('DIGITUNDER')}
+                className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-teal-500 to-cyan-500 hover:from-teal-400 hover:to-cyan-400 text-slate-950 font-black text-xs flex items-center gap-1.5 transition-all shadow-md shadow-teal-500/20 active:scale-95 disabled:opacity-50"
+              >
+                <ArrowRightLeft className="w-3.5 h-3.5" />
+                <span>Trade Under</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={isTrading}
+                onClick={() => handleExecuteTrade('DIGITOVER')}
+                className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-400 hover:to-indigo-400 text-white font-black text-xs flex items-center gap-1.5 transition-all shadow-md shadow-blue-500/20 active:scale-95 disabled:opacity-50"
+              >
+                <ArrowRightLeft className="w-3.5 h-3.5" />
+                <span>Trade Over</span>
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                disabled={isTrading}
+                onClick={() => handleExecuteTrade('DIGITEVEN')}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all active:scale-95 disabled:opacity-50 ${
+                  isEvenSignal
+                    ? 'bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 shadow-md shadow-emerald-500/30 ring-2 ring-emerald-400/50'
+                    : 'bg-emerald-950/80 hover:bg-emerald-900 border border-emerald-600/60 text-emerald-300'
+                }`}
+              >
+                <Zap className="w-3.5 h-3.5" />
+                <span>Trade Even</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={isTrading}
+                onClick={() => handleExecuteTrade('DIGITODD')}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all active:scale-95 disabled:opacity-50 ${
+                  isOddSignal
+                    ? 'bg-gradient-to-r from-fuchsia-500 to-pink-500 hover:from-fuchsia-400 hover:to-pink-400 text-white shadow-md shadow-fuchsia-500/30 ring-2 ring-fuchsia-400/50'
+                    : 'bg-fuchsia-950/80 hover:bg-fuchsia-900 border border-fuchsia-600/60 text-fuchsia-300'
+                }`}
+              >
+                <Zap className="w-3.5 h-3.5" />
+                <span>Trade Odd</span>
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Live Trade Settlement Toast */}
+      {isTrading && (
+        <div className="mt-2.5 p-2 rounded-xl bg-cyan-950/50 border border-cyan-500/50 flex items-center justify-between text-xs font-mono text-cyan-300 animate-pulse">
+          <div className="flex items-center gap-2">
+            <span className="w-3 h-3 rounded-full border-2 border-cyan-400 border-t-transparent animate-spin" />
+            <span>Submitting contract order to real Deriv platform...</span>
+          </div>
+          <span className="font-bold text-white">${customStake || quickStake}</span>
+        </div>
+      )}
+
+      {lastResult && (
+        <div
+          className={`mt-2.5 p-2.5 rounded-xl border flex items-center justify-between text-xs font-mono animate-fade-in ${
+            lastResult.won
+              ? 'bg-emerald-950/60 border-emerald-500/80 text-emerald-300 shadow-md shadow-emerald-950'
+              : lastResult.errorMsg
+              ? 'bg-rose-950/70 border-rose-500/80 text-rose-300'
+              : 'bg-rose-950/60 border-rose-500/80 text-rose-300 shadow-md shadow-rose-950'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {lastResult.won ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            ) : (
+              <XCircle className="w-4 h-4 text-rose-400 shrink-0" />
+            )}
+            <div>
+              {lastResult.errorMsg ? (
+                <span className="font-bold">{lastResult.errorMsg}</span>
+              ) : (
+                <>
+                  <span className="font-extrabold uppercase mr-1.5">
+                    {lastResult.won ? 'Contract Won!' : 'Contract Lost'}
+                  </span>
+                  {lastResult.exitDigit !== undefined && (
+                    <span className="text-slate-300">
+                      Exit Digit: <strong className="text-white font-bold">{lastResult.exitDigit}</strong>
+                    </span>
+                  )}
+                  {lastResult.contractId && (
+                    <span className="text-[10px] text-slate-400 ml-1.5">
+                      (ID: {lastResult.contractId})
+                    </span>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+
+          {!lastResult.errorMsg && (
+            <div className="font-black text-sm tabular-nums">
+              {lastResult.won ? (
+                <span className="text-emerald-400">+${(lastResult.payout - lastResult.stake).toFixed(2)}</span>
+              ) : (
+                <span className="text-rose-400">-${lastResult.stake.toFixed(2)}</span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
