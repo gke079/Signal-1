@@ -1,0 +1,6 @@
+{
+  "name": "Deriv Digit Tool & Real-Time Market Streamer",
+  "description": "Real-time Deriv WebSocket digit analysis scanner, live tick streaming, even/odd prediction signals, and account balance tracker.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
