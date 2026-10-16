@@ -1,12 +1,12 @@
 import React from 'react';
 import { DigitStats, MarketSymbol } from '../types/deriv';
-import { X, Sparkles, TrendingUp, Zap, BarChart3, AlertCircle, ShieldCheck } from 'lucide-react';
+import { X, Sparkles, BarChart3, ShieldCheck } from 'lucide-react';
 
 interface AiAnalysisModalProps {
   market: MarketSymbol | null;
   stats: DigitStats | null;
   onClose: () => void;
-  onPlaceTrade: (
+  onPlaceTrade?: (
     symbol: string,
     contractType: 'DIGITEVEN' | 'DIGITODD' | 'DIGITOVER' | 'DIGITUNDER',
     stake: number
@@ -17,7 +17,6 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
   market,
   stats,
   onClose,
-  onPlaceTrade,
 }) => {
   if (!market || !stats) return null;
 
@@ -85,27 +84,19 @@ export const AiAnalysisModal: React.FC<AiAnalysisModalProps> = ({
             <p className="text-xs text-slate-300 mt-1.5">{stats.signal.reason}</p>
           </div>
 
-          <div className="flex sm:flex-col gap-2 shrink-0">
-            <button
-              onClick={() => {
-                onPlaceTrade(market.id, 'DIGITEVEN', 2);
-                onClose();
-              }}
-              className="flex-1 sm:flex-none px-3 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-bold text-xs hover:bg-emerald-400 transition-all flex items-center justify-center gap-1.5"
-            >
-              <Zap className="w-3.5 h-3.5" />
-              <span>Instant Even Trade ($2)</span>
-            </button>
-            <button
-              onClick={() => {
-                onPlaceTrade(market.id, 'DIGITODD', 2);
-                onClose();
-              }}
-              className="flex-1 sm:flex-none px-3 py-1.5 rounded-lg bg-fuchsia-500 text-white font-bold text-xs hover:bg-fuchsia-400 transition-all flex items-center justify-center gap-1.5"
-            >
-              <TrendingUp className="w-3.5 h-3.5" />
-              <span>Instant Odd Trade ($2)</span>
-            </button>
+          <div className="flex sm:flex-col gap-1.5 shrink-0">
+            <div className="px-3.5 py-2 rounded-xl bg-[#0b101e] border border-slate-800 text-left sm:text-right">
+              <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block">Recommended Bias</span>
+              <span className={`text-xs sm:text-sm font-extrabold font-mono uppercase ${
+                stats.signal.type === 'even'
+                  ? 'text-emerald-400'
+                  : stats.signal.type === 'odd'
+                  ? 'text-fuchsia-400'
+                  : 'text-cyan-400'
+              }`}>
+                {stats.signal.type === 'even' ? 'Even Digit (0,2,4,6,8)' : stats.signal.type === 'odd' ? 'Odd Digit (1,3,5,7,9)' : 'Neutral / Monitor'}
+              </span>
+            </div>
           </div>
         </div>
 

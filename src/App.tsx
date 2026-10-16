@@ -11,7 +11,6 @@ import { AiAnalysisModal } from './components/AiAnalysisModal';
 import { TokenModal } from './components/TokenModal';
 import { SettingsModal } from './components/SettingsModal';
 import { ConnectionModal } from './components/ConnectionModal';
-import { TradeHistoryDrawer } from './components/TradeHistoryDrawer';
 import { derivWS, SUPPORTED_MARKETS, ConnectionState } from './services/derivWebSocket';
 import { audioService } from './services/audioAlerts';
 import { calculateDigitStats } from './utils/digitAnalysis';
@@ -21,11 +20,9 @@ import {
   DigitStats,
   MarketSymbol,
   ScanMode,
-  TradeOrder,
 } from './types/deriv';
 import {
   Sparkles,
-  History,
   Activity,
   Layers,
   Zap,
@@ -83,9 +80,6 @@ export default function App() {
   const [ticksMap, setTicksMap] = useState<Record<string, DerivTick[]>>({});
   const lastAlertTimes = useRef<Record<string, number>>({});
 
-  // Trades History
-  const [trades, setTrades] = useState<TradeOrder[]>([]);
-  const [isTradeHistoryOpen, setIsTradeHistoryOpen] = useState<boolean>(false);
 
   // Modals State
   const [isAccountModalOpen, setIsAccountModalOpen] = useState<boolean>(false);
@@ -196,46 +190,6 @@ export default function App() {
     audioService.setEnabled(nextState);
   };
 
-  const handlePlaceTrade = (
-    symbol: string,
-    contractType: 'DIGITEVEN' | 'DIGITODD' | 'DIGITOVER' | 'DIGITUNDER',
-    stake: number
-  ) => {
-    const orderId = Math.random().toString(36).substring(2, 9);
-    const newTrade: TradeOrder = {
-      id: orderId,
-      symbol,
-      contractType,
-      stake,
-      payout: 0,
-      status: 'pending',
-      timestamp: Date.now(),
-      isSimulated: !account.isAuthorized,
-    };
-
-    setTrades((prev) => [...prev, newTrade]);
-
-    derivWS.placeTrade(symbol, contractType, stake, 1, (won, exitTick, payout) => {
-      if (won) {
-        audioService.playWin();
-      } else {
-        audioService.playLoss();
-      }
-
-      setTrades((prev) =>
-        prev.map((t) =>
-          t.id === orderId
-            ? {
-                ...t,
-                status: won ? 'won' : 'lost',
-                payout,
-                exitTick,
-              }
-            : t
-        )
-      );
-    });
-  };
 
   const activeSignalsCount = useMemo(() => {
     return Object.values(marketStatsMap).filter((s) => s.signal.label.includes('ENTRY')).length;
@@ -406,7 +360,6 @@ export default function App() {
                   stats={stats}
                   scanMode={scanMode}
                   onOpenAnalysis={(sym) => setAnalyzingMarketId(sym)}
-                  onPlaceTrade={handlePlaceTrade}
                 />
               );
             })}
@@ -429,13 +382,9 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setIsTradeHistoryOpen(true)}
-              className="px-3 py-1 rounded-xl bg-[#141c2e] hover:bg-[#1a253c] border border-slate-700/80 text-slate-200 hover:text-white transition-all flex items-center gap-1.5"
-            >
-              <History className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Trades ({trades.length})</span>
-            </button>
+            <span className="text-[11px] text-slate-400">
+              Deriv Latency: <strong className="text-emerald-400 tabular-nums">{latencyMs}ms</strong>
+            </span>
           </div>
         </div>
       </footer>
@@ -446,7 +395,6 @@ export default function App() {
           market={SUPPORTED_MARKETS.find((m) => m.id === analyzingMarketId) || null}
           stats={marketStatsMap[analyzingMarketId] || null}
           onClose={() => setAnalyzingMarketId(null)}
-          onPlaceTrade={handlePlaceTrade}
         />
       )}
 
@@ -454,7 +402,7 @@ export default function App() {
       {isAccountModalOpen && (
         <TokenModal
           account={account}
-          onAuthorize={(token) => derivWS.authorize(token)}
+          onAuthorize={(token, cb) => derivWS.authorize(token, cb)}
           onDisconnect={() => derivWS.disconnectAccount()}
           onResetDemo={() => derivWS.resetDemoBalance(10000.0)}
           onClose={() => setIsAccountModalOpen(false)}
@@ -493,14 +441,6 @@ export default function App() {
           onClose={() => setIsConnectionModalOpen(false)}
         />
       )}
-
-      {/* Trade Execution History Drawer */}
-      <TradeHistoryDrawer
-        isOpen={isTradeHistoryOpen}
-        onClose={() => setIsTradeHistoryOpen(false)}
-        trades={trades}
-        onClearHistory={() => setTrades([])}
-      />
     </div>
   );
 }

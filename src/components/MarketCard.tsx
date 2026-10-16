@@ -1,13 +1,13 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { DigitStats, MarketSymbol, ScanMode } from '../types/deriv';
-import { Sparkles, ArrowUpRight, CheckCircle2, XCircle, TrendingUp, Zap } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 
 interface MarketCardProps {
   market: MarketSymbol;
   stats: DigitStats;
   scanMode: ScanMode;
   onOpenAnalysis: (symbol: string) => void;
-  onPlaceTrade: (
+  onPlaceTrade?: (
     symbol: string,
     contractType: 'DIGITEVEN' | 'DIGITODD' | 'DIGITOVER' | 'DIGITUNDER',
     stake: number
@@ -19,16 +19,7 @@ export const MarketCard: React.FC<MarketCardProps> = ({
   stats,
   scanMode,
   onOpenAnalysis,
-  onPlaceTrade,
 }) => {
-  const [quickStake, setQuickStake] = useState<number>(1);
-  const [isTrading, setIsTrading] = useState<boolean>(false);
-  const [lastTradeResult, setLastTradeResult] = useState<{
-    won: boolean;
-    profit: number;
-    digit: number;
-  } | null>(null);
-
   const { signal, evenPercent, oddPercent, underPercent, overPercent, ticks, countdownSec, currentStreak } = stats;
 
   const isEvenSignal = signal.type === 'even' && signal.label.includes('ENTRY');
@@ -45,18 +36,6 @@ export const MarketCard: React.FC<MarketCardProps> = ({
   const radius = 22;
   const circumference = 2 * Math.PI * radius;
   const strokeDashoffset = circumference - (progressPercent / 100) * circumference;
-
-  const handleTrade = (type: 'DIGITEVEN' | 'DIGITODD' | 'DIGITOVER' | 'DIGITUNDER') => {
-    setIsTrading(true);
-    setLastTradeResult(null);
-
-    onPlaceTrade(market.id, type, quickStake);
-
-    // Trade settles in 1 tick; we reset trading spinner after 1.5s
-    setTimeout(() => {
-      setIsTrading(false);
-    }, 1500);
-  };
 
   return (
     <div className="relative overflow-hidden rounded-2xl bg-[#0f1626]/90 border border-slate-800 hover:border-slate-700/80 p-3.5 sm:p-4.5 transition-all shadow-lg hover:shadow-cyan-950/20 backdrop-blur-sm group">
@@ -311,103 +290,6 @@ export const MarketCard: React.FC<MarketCardProps> = ({
         </div>
       </div>
 
-      {/* Trade Action Bar (Quick Execution) */}
-      <div className="mt-3 pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2.5">
-        {/* Stake Selector */}
-        <div className="flex items-center gap-1.5 text-xs text-slate-400">
-          <span className="text-[11px] font-mono">Stake:</span>
-          {[1, 2, 5, 10].map((stakeVal) => (
-            <button
-              key={stakeVal}
-              onClick={() => setQuickStake(stakeVal)}
-              className={`px-2 py-0.5 rounded text-xs font-mono font-bold transition-all ${
-                quickStake === stakeVal
-                  ? 'bg-cyan-500 text-slate-950 shadow-sm shadow-cyan-500/30'
-                  : 'bg-[#141c2e] hover:bg-[#1a253c] text-slate-300 border border-slate-800'
-              }`}
-            >
-              ${stakeVal}
-            </button>
-          ))}
-        </div>
-
-        {/* Action Buttons */}
-        <div className="flex items-center gap-2">
-          {scanMode === 'over_under' ? (
-            <>
-              <button
-                disabled={isTrading}
-                onClick={() => handleTrade('DIGITUNDER')}
-                className="px-3 py-1.5 rounded-xl bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-500/60 text-cyan-300 hover:text-white font-bold text-xs flex items-center gap-1.5 transition-all active:scale-95 disabled:opacity-50"
-              >
-                <Zap className="w-3.5 h-3.5 text-cyan-400" />
-                <span>Trade Under (0-4)</span>
-              </button>
-              <button
-                disabled={isTrading}
-                onClick={() => handleTrade('DIGITOVER')}
-                className="px-3 py-1.5 rounded-xl bg-blue-950/80 hover:bg-blue-900 border border-blue-500/60 text-blue-300 hover:text-white font-bold text-xs flex items-center gap-1.5 transition-all active:scale-95 disabled:opacity-50"
-              >
-                <TrendingUp className="w-3.5 h-3.5 text-blue-400" />
-                <span>Trade Over (5-9)</span>
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                disabled={isTrading}
-                onClick={() => handleTrade('DIGITEVEN')}
-                className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all active:scale-95 disabled:opacity-50 ${
-                  isEvenSignal
-                    ? 'bg-emerald-500 text-slate-950 hover:bg-emerald-400 shadow-md shadow-emerald-500/30 font-extrabold animate-pulse'
-                    : 'bg-emerald-950/80 hover:bg-emerald-900/90 border border-emerald-500/60 text-emerald-300 hover:text-white'
-                }`}
-              >
-                <Zap className="w-3.5 h-3.5" />
-                <span>Trade Even (1.95x)</span>
-              </button>
-              <button
-                disabled={isTrading}
-                onClick={() => handleTrade('DIGITODD')}
-                className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all active:scale-95 disabled:opacity-50 ${
-                  isOddSignal
-                    ? 'bg-fuchsia-500 text-white hover:bg-fuchsia-400 shadow-md shadow-fuchsia-500/30 font-extrabold animate-pulse'
-                    : 'bg-fuchsia-950/80 hover:bg-fuchsia-900/90 border border-fuchsia-500/60 text-fuchsia-300 hover:text-white'
-                }`}
-              >
-                <TrendingUp className="w-3.5 h-3.5" />
-                <span>Trade Odd (1.95x)</span>
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Instant Result Toast if present */}
-      {lastTradeResult && (
-        <div
-          className={`mt-2 p-2 rounded-lg text-xs font-mono flex items-center justify-between border ${
-            lastTradeResult.won
-              ? 'bg-emerald-950/70 border-emerald-700/60 text-emerald-300'
-              : 'bg-rose-950/70 border-rose-700/60 text-rose-300'
-          }`}
-        >
-          <div className="flex items-center gap-1.5">
-            {lastTradeResult.won ? (
-              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-            ) : (
-              <XCircle className="w-4 h-4 text-rose-400" />
-            )}
-            <span>
-              Exit Digit: <strong>{lastTradeResult.digit}</strong> ·{' '}
-              {lastTradeResult.won ? 'WIN' : 'LOSS'}
-            </span>
-          </div>
-          <span className="font-bold tabular-nums">
-            {lastTradeResult.won ? `+$${lastTradeResult.profit.toFixed(2)}` : `-$${quickStake.toFixed(2)}`}
-          </span>
-        </div>
-      )}
     </div>
   );
 };

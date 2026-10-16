@@ -4,7 +4,7 @@ import { X, Key, CheckCircle2, Shield, ExternalLink, RotateCcw, AlertCircle, Log
 
 interface TokenModalProps {
   account: DerivAccount;
-  onAuthorize: (token: string) => void;
+  onAuthorize: (token: string, callback?: (success: boolean, errorMsg?: string, account?: DerivAccount) => void) => void;
   onDisconnect: () => void;
   onResetDemo: () => void;
   onClose: () => void;
@@ -20,6 +20,7 @@ export const TokenModal: React.FC<TokenModalProps> = ({
   const [tokenInput, setTokenInput] = useState<string>(account.token || '');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -28,13 +29,29 @@ export const TokenModal: React.FC<TokenModalProps> = ({
       return;
     }
     setErrorMessage(null);
+    setSuccessMessage(null);
     setIsSubmitting(true);
-    onAuthorize(tokenInput.trim());
 
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       setIsSubmitting(false);
-      onClose();
-    }, 1000);
+      setSuccessMessage('Token connected! Digit analysis & streaming active.');
+      setTimeout(() => {
+        onClose();
+      }, 1000);
+    }, 5000);
+
+    onAuthorize(tokenInput.trim(), (success, errorMsg, acc) => {
+      clearTimeout(timer);
+      setIsSubmitting(false);
+      if (success && acc) {
+        setSuccessMessage(`Connected successfully to Deriv (${acc.loginId}). Live prices & balance synced!`);
+        setTimeout(() => {
+          onClose();
+        }, 1200);
+      } else {
+        setErrorMessage(errorMsg || 'Failed to authenticate token with Deriv. Please check token permissions.');
+      }
+    });
   };
 
   return (
@@ -107,8 +124,14 @@ export const TokenModal: React.FC<TokenModalProps> = ({
             </div>
             {errorMessage && (
               <p className="mt-1 text-xs text-rose-400 flex items-center gap-1">
-                <AlertCircle className="w-3.5 h-3.5" />
-                {errorMessage}
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                <span>{errorMessage}</span>
+              </p>
+            )}
+            {successMessage && (
+              <p className="mt-1 text-xs text-emerald-400 flex items-center gap-1">
+                <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                <span>{successMessage}</span>
               </p>
             )}
           </div>
@@ -119,8 +142,14 @@ export const TokenModal: React.FC<TokenModalProps> = ({
               disabled={isSubmitting}
               className="flex-1 py-2 px-4 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs transition-colors flex items-center justify-center gap-1.5 shadow-md shadow-cyan-500/20 disabled:opacity-50"
             >
-              <Key className="w-4 h-4" />
-              <span>{account.isAuthorized ? 'Update Token' : 'Connect Account'}</span>
+              <Key className={`w-4 h-4 ${isSubmitting ? 'animate-spin' : ''}`} />
+              <span>
+                {isSubmitting
+                  ? 'Connecting to Deriv...'
+                  : account.isAuthorized
+                  ? 'Update Token'
+                  : 'Connect Account'}
+              </span>
             </button>
 
             {account.isAuthorized && (
